@@ -65,7 +65,7 @@ def download_video(url: str, directory: Path, max_duration_s: int, max_bytes: in
     import yt_dlp
     check_url(url)
     directory.mkdir(parents=True, exist_ok=True)
-    opts = {"format": "b[height<=720]/b/best", "merge_output_format": "mp4", "outtmpl": str(directory / "source.%(ext)s"), "noplaylist": True, "quiet": True, "no_warnings": True, "socket_timeout": 20, "retries": 2, "max_filesize": max_bytes, "match_filter": yt_dlp.utils.match_filter_func(f"duration <= {max_duration_s}"), "restrictfilenames": True, "ignoreerrors": False, "extractor_args": {"youtube": {"player_client": ["default"]}}}
+    opts = {"format": "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b", "merge_output_format": "mp4", "outtmpl": str(directory / "source.%(ext)s"), "noplaylist": True, "quiet": True, "no_warnings": True, "socket_timeout": 20, "retries": 2, "max_filesize": max_bytes, "match_filter": yt_dlp.utils.match_filter_func(f"duration <= {max_duration_s}"), "restrictfilenames": True, "ignoreerrors": False}
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
