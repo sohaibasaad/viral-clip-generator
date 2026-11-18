@@ -14,7 +14,7 @@ from viralclip.core import download_video, pipeline
 st.set_page_config(page_title="ViralClip AI", page_icon="🎬", layout="wide")
 DATA = Path(tempfile.gettempdir()) / "viralclip_streamlit_jobs"
 DATA.mkdir(parents=True, exist_ok=True)
-MAX_SOURCE_MB = 150
+MAX_SOURCE_MB = 1000
 MAX_MINUTES = 120
 os.environ["MAX_VIDEO_MINUTES"] = str(MAX_MINUTES)
 
