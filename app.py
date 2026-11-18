@@ -8,7 +8,9 @@ import threading
 import uuid
 
 import streamlit as st
-from viralclip.core import download_video, pipeline
+import streamlit.components.v1 as components
+from viralclip.youtube import video_id, youtube_previews
+from viralclip.core import download_video, pipeline, probe
 
 st.set_page_config(page_title="ViralClip AI", page_icon="🎬", layout="wide")
 DATA = Path(tempfile.gettempdir()) / "viralclip_streamlit_jobs"
@@ -39,6 +41,9 @@ with st.sidebar:
 
 source_type = st.radio("Source", ["Video URL", "Upload video"], horizontal=True)
 url = st.text_input("Public YouTube/Vimeo URL (HTTPS)", placeholder="https://www.youtube.com/watch?v=...", disabled=source_type != "Video URL")
+preview_only = source_type == "Video URL" and st.checkbox(
+    "YouTube playback links only", help="Skip MP4 creation and preview timed segments in the YouTube player."
+)
 uploaded = st.file_uploader("Or upload your own MP4/MOV/MKV/WEBM (≤1000 MB)", type=["mp4", "mov", "mkv", "webm"],
                             disabled=source_type != "Upload video")
 
@@ -47,11 +52,26 @@ if "job_dir" not in st.session_state:
 if "manifest" not in st.session_state:
     st.session_state.manifest = None
 
+def show_previews(identifier):
+    with st.spinner("Finding segments from YouTube timing data"):
+        segments = youtube_previews(identifier, count, min_s, max_s)
+    st.session_state.youtube_result = (identifier, segments)
+
+
 if st.button("✨ Generate 5–7 clips", type="primary", disabled=max_s < min_s):
+    st.session_state.youtube_result = None
     if source_type == "Video URL" and not url.strip():
         st.error("Paste a valid public video URL first")
     elif source_type == "Upload video" and uploaded is None:
         st.error("Upload a video first")
+    elif preview_only:
+        try:
+            identifier = video_id(url)
+            if not identifier:
+                raise ValueError("Playback links require a YouTube URL.")
+            show_previews(identifier)
+        except Exception as exc:
+            st.error(f"Could not load YouTube timing data: {exc}")
     elif not server_lock().acquire(blocking=False):
         st.error("The free server is already working on another job; try again after it finishes")
     else:
@@ -71,7 +91,19 @@ if st.button("✨ Generate 5–7 clips", type="primary", disabled=max_s < min_s)
                 bar.progress(min(100, max(0, int(fraction * 100))))
             if source_type == "Video URL":
                 update("Downloading source (availability depends on the video platform)", .02)
-                source = download_video(url.strip(), job_dir)
+                try:
+                    source = download_video(url.strip(), job_dir)
+                    probe(source)
+                except RuntimeError as download_error:
+                    identifier = video_id(url)
+                    if not identifier:
+                        raise
+                    st.warning(f"MP4 export unavailable: {download_error}")
+                    show_previews(identifier)
+                    shutil.rmtree(job_dir, ignore_errors=True)
+                    status.empty()
+                    bar.empty()
+                    st.stop()
             else:
                 uploaded.seek(0)
                 suffix = Path(uploaded.name).suffix.lower()
@@ -95,6 +127,19 @@ if st.button("✨ Generate 5–7 clips", type="primary", disabled=max_s < min_s)
             st.error(f"Generation failed: {exc}")
         finally:
             server_lock().release()
+
+result = st.session_state.get("youtube_result")
+if result:
+    identifier, segments = result
+    st.subheader("YouTube playback links")
+    st.caption("The player stops at the segment end. The YouTube link opens the original recording at the start time.")
+    for i, segment in enumerate(segments, 1):
+        start, end = segment["start"], segment["end"]
+        with st.expander(f"{i}. {segment['title']} · {start // 60}:{start % 60:02d} – {end // 60}:{end % 60:02d}", expanded=i == 1):
+            st.caption(segment["basis"])
+            components.iframe(f"https://www.youtube.com/embed/{identifier}?start={start}&end={end}", height=320)
+            st.link_button("Open on YouTube", f"https://www.youtube.com/watch?v={identifier}&t={start}s")
+    st.stop()
 
 manifest = st.session_state.manifest
 folder = Path(st.session_state.job_dir) if st.session_state.job_dir else None
