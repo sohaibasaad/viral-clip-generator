@@ -1,7 +1,6 @@
 """ViralClip AI: GitHub/Streamlit Community Cloud app; no paid APIs or Docker."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -14,10 +13,6 @@ from viralclip.core import download_video, pipeline
 st.set_page_config(page_title="ViralClip AI", page_icon="🎬", layout="wide")
 DATA = Path(tempfile.gettempdir()) / "viralclip_streamlit_jobs"
 DATA.mkdir(parents=True, exist_ok=True)
-MAX_SOURCE_MB = 1000
-MAX_MINUTES = 120
-os.environ["MAX_VIDEO_MINUTES"] = str(MAX_MINUTES)
-
 @st.cache_resource
 def server_lock():
     return threading.Lock()
@@ -40,7 +35,7 @@ with st.sidebar:
     language = {"Auto-detect": None, "English": "en", "Urdu": "ur", "Hindi": "hi", "Spanish": "es", "Arabic": "ar"}[language_label]
     resolution = st.select_slider("Output resolution", options=[360, 540, 720], value=540,
                                   format_func=lambda x: f"{x} × {int(x*16/9)}")
-    st.caption("Initial processing is limited to 20 minutes and 150 MB. Free Streamlit Cloud has limited CPU and RAM.")
+    st.caption("YouTube and Vimeo recordings have no fixed duration limit. Longer videos take more time and temporary disk space.")
 
 source_type = st.radio("Source", ["Video URL", "Upload video"], horizontal=True)
 url = st.text_input("Public YouTube/Vimeo URL (HTTPS)", placeholder="https://www.youtube.com/watch?v=...", disabled=source_type != "Video URL")
@@ -76,10 +71,9 @@ if st.button("✨ Generate 5–7 clips", type="primary", disabled=max_s < min_s)
                 bar.progress(min(100, max(0, int(fraction * 100))))
             if source_type == "Video URL":
                 update("Downloading source (availability depends on the video platform)", .02)
-                source = download_video(url.strip(), job_dir, MAX_MINUTES*60, MAX_SOURCE_MB*1024*1024)
+                source = download_video(url.strip(), job_dir)
             else:
-                if uploaded.size > MAX_SOURCE_MB*1024*1024:
-                    raise ValueError(f"Upload must be no larger than {MAX_SOURCE_MB} MB")
+                uploaded.seek(0)
                 suffix = Path(uploaded.name).suffix.lower()
                 if suffix not in {".mp4", ".mov", ".mkv", ".webm"}:
                     raise ValueError("Unsupported video format")

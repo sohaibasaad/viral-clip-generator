@@ -39,7 +39,7 @@ Subtitle choice is made **before** generation, since captions are physically bur
 ## 4. Important Streamlit free hosting limits
 
 - Streamlit Community Cloud has relatively low available CPU and memory; exact resource allocation varies and may change. Transcription and encoding can take a long time or exhaust available resources.
-- Defaults: 5 clips, 20–45 seconds each, 540×960, CPU `tiny` model, 20-minute/150-MB input cap.
+- Defaults: 5 clips, 20–45 seconds each, 540×960, CPU `tiny` model, no fixed URL duration or byte cap. Browser uploads allow 150 MB per file. Speech recognition processes five minutes of audio at a time.
 - Choose **Without subtitles only** or **With subtitles only**, and 360×640, for lower rendering demand.
 - YouTube/Vimeo downloading with yt-dlp is **best effort** and can fail due to platform blocking, authentication, policy changes, or anti-bot checks. Uploading videos you control is more reliable.
 - This is a **transcript-based heuristic highlighter**. It does not guarantee viral outcomes, does not reliably handle non-speech music/montages, and may return fewer than 5 clips if there are too few distinct spoken moments.

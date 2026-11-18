@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import json
 import math
-import os
 from pathlib import Path
 import re
-import shutil
+from tempfile import TemporaryDirectory
 import subprocess
 from dataclasses import asdict, dataclass
 from bisect import bisect_left, bisect_right
@@ -61,47 +60,73 @@ def check_url(url: str) -> None:
         raise ValueError("For security, URL input currently supports YouTube and Vimeo only. Upload your other videos as MP4.")
 
 
-def download_video(url: str, directory: Path, max_duration_s: int, max_bytes: int) -> Path:
+def download_video(url: str, directory: Path) -> Path:
     import yt_dlp
     check_url(url)
     directory.mkdir(parents=True, exist_ok=True)
-    opts = {"format": "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b", "merge_output_format": "mp4", "outtmpl": str(directory / "source.%(ext)s"), "noplaylist": True, "quiet": True, "no_warnings": True, "socket_timeout": 20, "retries": 2, "max_filesize": max_bytes, "match_filter": yt_dlp.utils.match_filter_func(f"duration <= {max_duration_s}"), "restrictfilenames": True, "ignoreerrors": False}
+
+    def recorded_video(info, *, incomplete=False):
+        if info.get("live_status") in {"is_live", "is_upcoming"}:
+            return "Use a finished recording."
+        return None
+
+    opts = {
+        "format": "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b",
+        "merge_output_format": "mp4",
+        "outtmpl": str(directory / "source.%(ext)s"),
+        "noplaylist": True,
+        "playlistend": 1,
+        "match_filter": recorded_video,
+        "js_runtimes": {"node": {}},
+        "socket_timeout": 20,
+        "retries": 2,
+        "quiet": True,
+    }
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            if not info or info.get("_type") == "playlist":
-                raise ValueError("Please provide a single video URL")
-            duration = info.get("duration")
-            if duration and duration > max_duration_s:
-                raise ValueError(f"Video exceeds the {max_duration_s // 60}-minute limit")
-            filesize = info.get("filesize") or info.get("filesize_approx")
-            if filesize and filesize > max_bytes:
-                raise ValueError("Source video exceeds the configured file size limit")
+            if not info or info.get("_type") in {"playlist", "multi_video"}:
+                raise ValueError("Please provide a single recorded video URL")
+            if recorded_video(info):
+                raise ValueError("Use a finished recording.")
             ydl.download([url])
     except yt_dlp.utils.DownloadError as exc:
-        raise RuntimeError(f"Could not download this video. It may be restricted or unavailable: {exc}") from exc
-    files = [p for p in directory.glob("source.*") if p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}]
+        if "403" in str(exc):
+            raise RuntimeError("The video platform refused the media download (HTTP 403). Upload your original video or run the app locally and retry the URL.") from exc
+        raise RuntimeError(f"Could not download the source video: {exc}") from exc
+    files = [p for p in directory.glob("source.*") if p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"} and p.stat().st_size]
     if not files:
         raise RuntimeError("Download finished without a playable video file")
-    source = max(files, key=lambda p: p.stat().st_size)
-    if source.stat().st_size > max_bytes:
-        source.unlink(missing_ok=True)
-        raise ValueError("Source file exceeds the configured size limit")
-    return source
+    return max(files, key=lambda p: p.stat().st_size)
 
 
-def transcribe(source: Path, model_name: str = "base", language: str | None = None) -> tuple[list[Word], str]:
+def transcribe(source: Path, model_name: str, language: str | None, duration: float,
+               progress: Callable[[str, float], None]) -> tuple[list[Word], str]:
     from faster_whisper import WhisperModel
     model = WhisperModel(model_name, device="cpu", compute_type="int8", cpu_threads=2)
-    segments, info = model.transcribe(str(source), beam_size=1, language=language, vad_filter=True, word_timestamps=True, condition_on_previous_text=False)
     words: list[Word] = []
-    for segment in segments:
-        for w in segment.words or []:
-            if w.word.strip() and w.end > w.start:
-                words.append(Word(round(w.start, 3), round(w.end, 3), w.word.strip()))
+    chunk_seconds = 300
+    chunks = math.ceil(duration / chunk_seconds)
+    with TemporaryDirectory(dir=source.parent) as temp:
+        audio = Path(temp) / "audio.wav"
+        for index in range(chunks):
+            offset = index * chunk_seconds
+            length = min(chunk_seconds, duration - offset)
+            progress(f"Transcribing audio section {index + 1} of {chunks}", .12 + .42 * index / chunks)
+            run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-ss", str(offset),
+                 "-i", str(source), "-t", str(length), "-map", "0:a:0", "-ac", "1",
+                 "-ar", "16000", "-c:a", "pcm_s16le", str(audio)])
+            segments, info = model.transcribe(str(audio), beam_size=1, language=language,
+                vad_filter=True, word_timestamps=True, condition_on_previous_text=False)
+            for segment in segments:
+                for w in segment.words or []:
+                    end = min(length, w.end)
+                    if w.word.strip() and end > w.start:
+                        words.append(Word(round(offset + w.start, 3), round(offset + end, 3), w.word.strip()))
+                        language = language or info.language
     if not words:
-        raise ValueError("No recognizable speech found. This version requires spoken content for highlight scoring")
-    return words, info.language
+        raise ValueError("No recognizable speech found in this recording")
+    return words, language
 
 
 def score_text(words: list[Word], start: float, end: float) -> tuple[float, str]:
@@ -276,12 +301,10 @@ def pipeline(source: Path, directory: Path, count: int, min_s: int, max_s: int, 
         raise ValueError("Invalid subtitle mode")
     progress("Checking source video", .05)
     info = probe(source)
-    if info["duration"] > int(os.getenv("MAX_VIDEO_MINUTES", "20")) * 60:
-        raise ValueError("Video exceeds the configured duration limit")
     if not info["audio"]:
         raise ValueError("Source has no audio; this tool selects clips from speech")
     progress("Transcribing speech on CPU", .12)
-    words, detected_language = transcribe(source, model, language)
+    words, detected_language = transcribe(source, model, language, info["duration"], progress)
     progress("Ranking video highlights", .55)
     clips = make_candidates(words, count, min_s, max_s, info["duration"])
     if not clips:
