@@ -39,7 +39,7 @@ with st.sidebar:
 
 source_type = st.radio("Source", ["Video URL", "Upload video"], horizontal=True)
 url = st.text_input("Public YouTube/Vimeo URL (HTTPS)", placeholder="https://www.youtube.com/watch?v=...", disabled=source_type != "Video URL")
-uploaded = st.file_uploader("Or upload your own MP4/MOV/MKV/WEBM (≤150 MB)", type=["mp4", "mov", "mkv", "webm"],
+uploaded = st.file_uploader("Or upload your own MP4/MOV/MKV/WEBM (≤1000 MB)", type=["mp4", "mov", "mkv", "webm"],
                             disabled=source_type != "Upload video")
 
 if "job_dir" not in st.session_state:
