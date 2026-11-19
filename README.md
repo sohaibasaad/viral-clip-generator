@@ -1,6 +1,6 @@
 # ViralClip AI — Streamlit Community Cloud edition
 
-A Python application that accepts a permitted YouTube/Vimeo URL or an uploaded spoken video, selects up to 5–7 non-overlapping highlights, crops to portrait (9:16), generates word-highlight captions, and provides **MP4 and ZIP downloads with subtitles, without subtitles, or both**. No paid AI API or Docker is required.
+A Python application that accepts a permitted YouTube/Vimeo URL or an uploaded spoken video, selects up to 5–7 non-overlapping highlights, fits the complete shot inside a 9:16 canvas, generates word-highlight captions, and provides **MP4 and ZIP downloads with subtitles, without subtitles, or both**. No paid AI API or Docker is required.
 
 ## 1. Publish to GitHub
 
@@ -43,7 +43,7 @@ Subtitle choice is made **before** generation, since captions are physically bur
 - Choose **Without subtitles only** or **With subtitles only**, and 360×640, for lower rendering demand.
 - YouTube/Vimeo downloading with yt-dlp is **best effort** and can fail due to platform blocking, authentication, policy changes, or anti-bot checks. Uploading videos you control is more reliable.
 - This is a **transcript-based heuristic highlighter**. It does not guarantee viral outcomes, does not reliably handle non-speech music/montages, and may return fewer than 5 clips if there are too few distinct spoken moments.
-- The current face crop uses sampled face positions to select one **fixed crop per clip**; it does **not** continuously follow moving faces.
+- The full source picture is centered over a darkened, blurred backdrop. Wide shots retain both edges when exported vertically.
 - Files live temporarily on the Streamlit server and can disappear on restart. Download promptly. There is no durable storage, multi-tenant isolation, or queue. A simple server lock prevents concurrent jobs within one running process.
 - Do not make the app public to untrusted users without adding authentication, quotas, automatic stale-job cleanup, and sandboxing.
 - Download and reuse only footage you own or are authorized to edit and republish.

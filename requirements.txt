@@ -2,5 +2,5 @@ streamlit>=1.40,<2
 faster-whisper>=1.1,<2
 nodejs-wheel>=22,<25
 yt-dlp[default]>=2026.10.26
-opencv-python-headless>=4.9,<5
+av==18.0.0
 numpy>=1.26,<3

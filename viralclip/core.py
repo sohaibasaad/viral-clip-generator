@@ -30,9 +30,9 @@ class Candidate:
     transcript: str
 
 
-def run(cmd: list[str], timeout: int = 3600) -> str:
+def run(cmd: list[str], timeout: int = 3600, cwd: Path | None = None) -> str:
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd, check=False)
     except FileNotFoundError as exc:
         raise RuntimeError(f"Executable not installed: {cmd[0]}") from exc
     except subprocess.TimeoutExpired as exc:
@@ -191,32 +191,6 @@ def make_candidates(words: list[Word], count: int, min_s: int, max_s: int, durat
     return selected
 
 
-def face_center(source: Path, start: float, end: float, width: int, height: int) -> float:
-    """Sample frame faces, return median X center, otherwise centered crop."""
-    try:
-        import cv2
-        cap = cv2.VideoCapture(str(source))
-        cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        centers = []
-        for sec in [start + (end-start)*f for f in (0.2,0.4,0.6,0.8)]:
-            cap.set(cv2.CAP_PROP_POS_MSEC, max(0, sec)*1000)
-            ok, frame = cap.read()
-            if not ok:
-                continue
-            h,w = frame.shape[:2]
-            scale = min(1,640/max(w,h))
-            small = cv2.resize(frame, None, fx=scale, fy=scale)
-            gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
-            faces = cascade.detectMultiScale(gray, scaleFactor=1.12, minNeighbors=4, minSize=(28,28))
-            if len(faces):
-                x,y,fw,fh = max(faces, key=lambda b:b[2]*b[3])
-                centers.append((x+fw/2)/small.shape[1])
-        cap.release()
-        return float(sorted(centers)[len(centers)//2]) if centers else 0.5
-    except Exception:
-        return 0.5
-
-
 def ass_time(sec: float) -> str:
     centi = max(0, int(round(sec*100)))
     return f"{centi//360000}:{(centi//6000)%60:02}:{(centi//100)%60:02}.{centi%100:02}"
@@ -263,28 +237,28 @@ def render(source: Path, clip: Candidate, words: list[Word], output_dir: Path, i
     if subtitles:
         write_captions(words, clip, subs)
     out = output_dir / f"clip_{index:02}_{variant}.mp4"
-    width,height = info["width"], info["height"]
-    center = face_center(source, clip.start, clip.end, width, height)
-    # Crop to 9:16 from existing footage; no letterbox, no unnecessary distortion.
-    crop_w = min(width, int(height*9/16))
-    crop_h = min(height, int(width*16/9))
-    x = int(max(0, min(width-crop_w, width*center-crop_w/2)))
-    y = int(max(0, (height-crop_h)//2))
-    # Relative ASS filename (no shell escaping) because ffmpeg runs inside output folder.
-    vf = f"crop={crop_w}:{crop_h}:{x}:{y},scale={resolution}:{int(resolution*16/9)},setsar=1"
+    height = resolution * 16 // 9
+    # Keep the whole foreground shot; only the decorative backdrop is cropped.
+    # Resolve the display aspect first so anamorphic inputs keep their proportions.
+    vf = (
+        "scale=w='max(2,round(ih*dar/2)*2)':h=ih,setsar=1,split=2[back][front];"
+        f"[back]scale={resolution}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={resolution}:{height},boxblur=16:2,eq=brightness=-0.12[canvas];"
+        f"[front]scale={resolution}:{height}:force_original_aspect_ratio=decrease:"
+        "force_divisible_by=2,setsar=1[picture];"
+        "[canvas][picture]overlay=(W-w)/2:(H-h)/2,setsar=1"
+    )
     if subtitles:
         vf += f",ass={subs.name}"
-    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", str(clip.start), "-i", str(source), "-t", str(clip.end-clip.start), "-vf", vf, "-map", "0:v:0"]
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+           "-ss", str(clip.start), "-i", str(source.resolve()), "-t", str(clip.end-clip.start),
+           "-filter_complex_threads", "2", "-filter_complex", vf + "[portrait]", "-map", "[portrait]"]
     if info["audio"]:
         cmd += ["-map", "0:a:0", "-c:a", "aac", "-b:a", "128k"]
     else:
         cmd += ["-an"]
-    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf), "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-threads", "2", str(out)]
-    # Absolute paths avoid process-wide chdir races across Streamlit sessions.
-    if subtitles:
-        vf = vf.replace(f"ass={subs.name}", f"ass={subs.as_posix().replace(chr(58), chr(92)+chr(58))}")
-        cmd[cmd.index("-vf") + 1] = vf
-    run(cmd, timeout=2400)
+    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf), "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-threads", "2", str(out.resolve())]
+    run(cmd, timeout=2400, cwd=output_dir)
     return out
 
 
