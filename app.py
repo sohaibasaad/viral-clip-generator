@@ -25,9 +25,9 @@ st.info("Best for spoken videos (podcasts, interviews, tutorials). Scores estima
 
 with st.sidebar:
     st.header("Clip settings")
-    count = st.slider("Number of clips", min_value=5, max_value=7, value=5)
-    min_s = st.slider("Minimum duration (seconds)", min_value=15, max_value=45, value=20, step=5)
-    max_s = st.slider("Maximum duration (seconds)", min_value=30, max_value=75, value=45, step=5)
+    count = st.slider("Number of clips", min_value=3, max_value=9, value=5)
+    min_s = st.slider("Minimum duration (seconds)", min_value=10, max_value=45, value=10, step=5)
+    max_s = st.slider("Maximum duration (seconds)", min_value=15, max_value=75, value=15, step=5)
     mode_label = st.radio("Subtitles / download versions", ["Both versions", "With subtitles only", "Without subtitles only"], index=0,
                           help="Both versions creates two MP4 files per clip. On Streamlit free hosting this can take substantially longer.")
     mode = {"Both versions":"both", "With subtitles only":"on", "Without subtitles only":"off"}[mode_label]
@@ -58,7 +58,7 @@ def show_previews(identifier):
     st.session_state.youtube_result = (identifier, segments)
 
 
-if st.button("✨ Generate 5–7 clips", type="primary", disabled=max_s < min_s):
+if st.button("✨ Generate 4–9 clips", type="primary", disabled=max_s < min_s):
     st.session_state.youtube_result = None
     if source_type == "Video URL" and not url.strip():
         st.error("Paste a valid public video URL first")
